@@ -4,6 +4,9 @@ import cordex as cx
 import datetime as dt
 import cftime as cfdt
 import json
+
+from cartopy import crs as ccrs
+from pprint import pprint
 from dateutil import relativedelta as reld
 from warnings import warn
 
@@ -165,11 +168,14 @@ def _define_grid(ds, table, grid_table="grids"):
     cmorTime, cmorLat, cmorLon = _define_axes(ds, table)
     _load_table(grid_table)
 
+    pole = _get_pole(ds)
+    vertices = cx.vertices(ds.rlon, ds.rlat, ccrs.RotatedPole(pole.grid_north_pole_longitude, pole.grid_north_pole_latitude) )
+    
     cmorGrid = cmor.grid(
-        [cmorLat, cmorLon], latitude=ds.lat.values, longitude=ds.lon.values
+        [cmorLat, cmorLon], latitude=ds.lat.values, longitude=ds.lon.values,
+        latitude_vertices=vertices.lat_vertices.values, longitude_vertices=vertices.lon_vertices.values
     )
 
-    pole = _get_pole(ds)
     pole_dict = {
         "grid_north_pole_latitude": pole.grid_north_pole_latitude,
         "grid_north_pole_longitude": pole.grid_north_pole_longitude,
@@ -192,8 +198,11 @@ def _cmor_write(da, table, cmorTime, cmorGrid, file_name=True):
     else:
         coords = [cmorTime, cmorGrid]
     cmor_var = cmor.variable(da.name, da.units, coords)
+    print(da.values.shape)
     cmor.write(cmor_var, da.values)
-    return cmor.close(cmor_var, file_name=file_name)
+    filename = cmor.close(cmor_var, file_name=file_name)
+    cmor.close()
+    return filename
 
 
 def _units_convert(da, table_file):
@@ -219,7 +228,6 @@ def prepare_variable(
     ds,
     varname,
     CORDEX_domain=None,
-    time_units="days since 1949-12-01T00:00:00",
     time_range=None,
     squeeze=True,
     allow_derive=False,
@@ -251,8 +259,6 @@ def prepare_variable(
     # remove point coordinates, e.g, height2m
     if squeeze is True:
         var_ds = var_ds.squeeze(drop=True)
-    if time_units is not None:
-        var_ds["time"] = _set_time_units(ds.time, time_units)
     if CORDEX_domain is not None:
         var_ds = _crop_to_cordex_domain(var_ds, CORDEX_domain)
     #var_ds.attrs = ds.attrs
@@ -267,8 +273,9 @@ def adjust_frequency(ds, cfvarinfo, input_freq=None):
         return ds
     freq = freq_map[cfvarinfo['frequency']]
     if freq != input_freq:
-        warn('resampling input data from {} to {}'.format(input_freq, freq))
-        resample = _resample(ds, freq, time_cell_method=_strip_time_cell_method(cfvarinfo))
+        time_cell_method = _strip_time_cell_method(cfvarinfo)
+        warn('resampling input data from {} to {}, time_cell_method: {}'.format(input_freq, freq, time_cell_method))
+        resample = _resample(ds, freq, time_cell_method=time_cell_method)
         return resample
     return ds
     
@@ -276,7 +283,8 @@ def adjust_frequency(ds, cfvarinfo, input_freq=None):
 
 def cmorize_variable(
     ds, varname, cmor_table, dataset_table, allow_units_convert=False, 
-    allow_resample=False, input_freq=None, CORDEX_domain=None, **kwargs
+    allow_resample=False, input_freq=None, CORDEX_domain=None, time_units="days since 1949-12-01T00:00:00",
+    **kwargs
 ):
     """Cmorizes a variable.
 
@@ -311,6 +319,11 @@ def cmorize_variable(
                                   CORDEX_domain='EUR-11')
 
     """
+    try:
+        cf_varinfo = _get_cfvarinfo(varname, cmor_table)
+    except:
+        raise Exception('{} not found in table {}'.format(varname, cmor_table))
+    pprint(cf_varinfo)
     if CORDEX_domain is None:
         try:
             CORDEX_domain = ds.CORDEX_domain
@@ -318,7 +331,7 @@ def cmorize_variable(
             warnings.warn("could not identify CORDEX domain")
     ds_prep = prepare_variable(ds, varname, **kwargs)
     #time_cell_method = _get_time_cell_method(varname, cmor_table)
-    ds_prep = adjust_frequency(ds_prep, _get_cfvarinfo(varname, cmor_table), input_freq)
+    ds_prep = adjust_frequency(ds_prep, cf_varinfo, input_freq)
     pole = _get_pole(ds_prep)
     if pole is None:
         pole = _get_cordex_pole(CORDEX_domain)
@@ -326,6 +339,8 @@ def cmorize_variable(
     #return ds_prep
     if allow_units_convert is True:
         ds_prep[varname] = _units_convert(ds_prep[varname], cmor_table)
+    if time_units is not None:
+        ds_prep["time"] = _set_time_units(ds_prep.time, time_units)
     _setup(dataset_table)
     cmorTime, cmorGrid = _define_grid(ds_prep, cmor_table)
     return _cmor_write(ds_prep[varname], cmor_table, cmorTime, cmorGrid)

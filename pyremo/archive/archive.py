@@ -1,5 +1,6 @@
 
-
+import os
+import tarfile
 
 def cdo_call(options='', op='', input='', output=None):
     call = "cdo {} {} {} {}".format(options, op, input, output)

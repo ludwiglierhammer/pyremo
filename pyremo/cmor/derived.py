@@ -40,7 +40,7 @@ class derivator:
     def derive(cls, ds, cf_varname):
         func = cls.get_function(cf_varname)
         params = cls.get_params(cf_varname)
-        args = (ds[param] for param in params if param in ds)
+        args = (ds[param] for param in params)
         warn("computing {} from {}".format(cf_varname, [p for p in params]))
         return func(*args)
 

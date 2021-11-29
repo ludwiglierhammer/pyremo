@@ -62,3 +62,8 @@ def _get_time_cell_method(cf_varname, table):
 
 def _strip_time_cell_method(cfvarinfo):
     return cfvarinfo['cell_methods'].split('time:')[1].strip()
+
+
+def _write_chunks(ds, chunk=None):
+    pass
+    
